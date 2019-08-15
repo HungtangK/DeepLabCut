@@ -1,10 +1,13 @@
 """
-DeepLabCut Toolbox
+DeepLabCut2.0 Toolbox (deeplabcut.org)
+© A. & M. Mathis Labs
 https://github.com/AlexEMG/DeepLabCut
-T Nath, nath@rowland.harvard.edu
-A Mathis, alexander.mathis@bethgelab.org
-M Mathis, mackenzie@post.harvard.edu
+Please see AUTHORS for contributors.
+
+https://github.com/AlexEMG/DeepLabCut/blob/master/AUTHORS
+Licensed under GNU Lesser General Public License v3.0
 """
+
 
 import sys
 import wx
@@ -300,7 +303,7 @@ class MainFrame(wx.Frame):
         self.updatedCoords = []
 
         img_name = Path(self.index[self.iter]).name
-        self.axes.clear()
+#        self.axes.clear()
         self.figure.delaxes(self.figure.axes[1])
         self.figure,self.axes,self.canvas,self.toolbar = self.image_panel.drawplot(self.img,img_name,self.iter,self.index,self.threshold,self.bodyparts,self.colormap,self.preview)
         MainFrame.plot(self,self.img)

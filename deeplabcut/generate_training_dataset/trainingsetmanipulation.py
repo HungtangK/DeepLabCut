@@ -1,9 +1,11 @@
 """
-DeepLabCut2.0 Toolbox
+DeepLabCut2.0 Toolbox (deeplabcut.org)
+© A. & M. Mathis Labs
 https://github.com/AlexEMG/DeepLabCut
-A Mathis, alexander.mathis@bethgelab.org
-T Nath, nath@rowland.harvard.edu
-M Mathis, mackenzie@post.harvard.edu
+
+Please see AUTHORS for contributors.
+https://github.com/AlexEMG/DeepLabCut/blob/master/AUTHORS
+Licensed under GNU Lesser General Public License v3.0
 """
 
 from pathlib import Path
@@ -21,20 +23,11 @@ elif platform.system() == 'Darwin':
 else:
     mpl.use('TkAgg')
 import matplotlib.pyplot as plt
-
-
-
-#if os.environ.get('DLClight', default=False) == 'True':
-#    mpl.use('AGG') #anti-grain geometry engine #https://matplotlib.org/faq/usage_faq.html
-#    pass
-#else:
-#    mpl.use('TkAgg')
-#import matplotlib.pyplot as plt
 from skimage import io
 
 import yaml
 from deeplabcut import DEBUG
-from deeplabcut.utils import auxiliaryfunctions, conversioncode
+from deeplabcut.utils import auxiliaryfunctions, conversioncode, auxfun_models
 
 #matplotlib.use('Agg')
 
@@ -189,7 +182,7 @@ def dropannotationfileentriesduetodeletedimages(config):
             DC.to_csv(os.path.join(str(folder),'CollectedData_'+ cfg['scorer']+".csv"))
 
 
-def label_frames(config):
+def label_frames(config,ma=False):
     """
     Manually label/annotate the extracted frames. Update the list of body parts you want to localize in the config.yaml file first.
 
@@ -208,10 +201,15 @@ def label_frames(config):
     wd = Path(config).resolve().parents[0]
     os.chdir(str(wd))
 
-    from deeplabcut.generate_training_dataset import labeling_toolbox
-
-    # labeling_toolbox.show(config,Screens,scale_w,scale_h, winHack, img_scale)
-    labeling_toolbox.show(config)
+    if ma==False:
+        from deeplabcut.generate_training_dataset import labeling_toolbox
+    
+        # labeling_toolbox.show(config,Screens,scale_w,scale_h, winHack, img_scale)
+        labeling_toolbox.show(config)
+    else:
+        from deeplabcut.generate_training_dataset import multiple_individual_labeling_toolbox
+        multiple_individual_labeling_toolbox.show(config)
+        
     os.chdir(startpath)
 
 def get_cmap(n, name='jet'):
@@ -298,7 +296,8 @@ def MakeLabeledPlots(folder,DataCombined,cfg,Labels,Colorscheme,cc,scale):
             left=0, bottom=0, right=1, top=1, wspace=0, hspace=0)
         plt.gca().invert_yaxis()
 
-        plt.savefig(str(Path(tmpfolder)/imagename.split(os.sep)[-1])) #create file name
+        #plt.savefig(str(Path(tmpfolder)/imagename.split(os.sep)[-1])) 
+        plt.savefig(os.path.join(tmpfolder,str(Path(imagename).name))) #create file name also on Windows for Unix projects (and vice versa)
         plt.close("all")
     
 def boxitintoacell(joints):
@@ -434,15 +433,14 @@ def mergeandsplit(config,trainindex=0,uniform=True,windows2linux=False):
     >>> deeplabcut.create_training_dataset(config,Shuffles=[3],trainIndexes=trainIndexes,testIndexes=testIndexes)
     
     To freeze a (uniform) split:
-    >>> trainIndices, testIndices=deeplabcut.mergeandsplit(config,trainindex=0,uniform=True)
+    >>> trainIndexes, testIndexes=deeplabcut.mergeandsplit(config,trainindex=0,uniform=True)
     You can then create two model instances that have the identical trainingset. Thereby you can assess the role of various parameters on the performance of DLC.
     
-    >>> deeplabcut.create_training_dataset(config,Shuffles=[0],trainIndices=trainIndices,testIndices=testIndices)
-    >>> deeplabcut.create_training_dataset(config,Shuffles=[1],trainIndices=trainIndices,testIndices=testIndices)
+    >>> deeplabcut.create_training_dataset(config,Shuffles=[0],trainIndexes=trainIndexes,testIndexes=testIndexes)
+    >>> deeplabcut.create_training_dataset(config,Shuffles=[1],trainIndexes=trainIndexes,testIndexes=testIndexes)
     --------
     
     """
-    
     # Loading metadata from config file:
     cfg = auxiliaryfunctions.read_config(config)
     scorer = cfg['scorer']
@@ -479,7 +477,7 @@ def mergeandsplit(config,trainindex=0,uniform=True,windows2linux=False):
     return trainIndexes, testIndexes
 
 
-def create_training_dataset(config,num_shuffles=1,Shuffles=None,windows2linux=False,trainIndices=None,testIndices=None):
+def create_training_dataset(config,num_shuffles=1,Shuffles=None,windows2linux=False,trainIndexes=None,testIndexes=None):
     """
     Creates a training dataset. Labels from all the extracted frames are merged into a single .h5 file.\n
     Only the videos included in the config file are used to create this dataset.\n
@@ -501,9 +499,6 @@ def create_training_dataset(config,num_shuffles=1,Shuffles=None,windows2linux=Fa
         The annotation files contain path formated according to your operating system. If you label on windows 
         but train & evaluate on a unix system (e.g. ubunt, colab, Mac) set this variable to True to convert the paths. 
     
-    trainIndices and testIndices: list of indices for traininng and testing. Use mergeandsplit(config,trainindex=0,uniform=True,windows2linux=False) to create them
-    See help for deeplabcut.mergeandsplit?
-    
     Example
     --------
     >>> deeplabcut.create_training_dataset('/analysis/project/reaching-task/config.yaml',num_shuffles=1)
@@ -513,9 +508,7 @@ def create_training_dataset(config,num_shuffles=1,Shuffles=None,windows2linux=Fa
     """
     from skimage import io
     import scipy.io as sio
-    import deeplabcut
-    import subprocess
-
+    
     # Loading metadata from config file:
     cfg = auxiliaryfunctions.read_config(config)
     scorer = cfg['scorer']
@@ -526,28 +519,15 @@ def create_training_dataset(config,num_shuffles=1,Shuffles=None,windows2linux=Fa
     
     Data = merge_annotateddatasets(cfg,project_path,Path(os.path.join(project_path,trainingsetfolder)),windows2linux)
     Data = Data[scorer] #extract labeled data
-
-    #set model type. we will allow more in the future.
-    if cfg['resnet']==50:
-        net_type ='resnet_'+str(cfg['resnet'])
-        resnet_path = str(Path(deeplabcut.__file__).parents[0] / 'pose_estimation_tensorflow/models/pretrained/resnet_v1_50.ckpt')
-    elif cfg['resnet']==101:
-        net_type ='resnet_'+str(cfg['resnet'])
-        resnet_path = str(Path(deeplabcut.__file__).parents[0] / 'pose_estimation_tensorflow/models/pretrained/resnet_v1_101.ckpt')
-    else:
-        print("Currently only ResNet 50 or 101 supported, please change 'resnet' entry in config.yaml!")
-        num_shuffles=-1 #thus the loop below is empty...
-
-    if not Path(resnet_path).is_file():
-        """
-        Downloads the ImageNet pretrained weights for ResNet.
-        """
-        start = os.getcwd()
-        os.chdir(str(Path(resnet_path).parents[0]))
-        print("Downloading the pretrained model (ResNets)....")
-        subprocess.call("download.sh", shell=True)
-        os.chdir(start)
-
+    
+    #loading & linking pretrained models
+    net_type ='resnet_'+str(cfg['resnet'])
+    import deeplabcut
+    parent_path = Path(os.path.dirname(deeplabcut.__file__))
+    defaultconfigfile = str(parent_path / 'pose_cfg.yaml')
+    
+    model_path,num_shuffles=auxfun_models.Check4weights(net_type,parent_path,num_shuffles)
+    
     if Shuffles==None:
         Shuffles=range(1,num_shuffles+1,1)
     else:
@@ -558,11 +538,9 @@ def create_training_dataset(config,num_shuffles=1,Shuffles=None,windows2linux=Fa
     for shuffle in Shuffles: # Creating shuffles starting from 1
         for trainFraction in TrainingFraction:
             #trainIndexes, testIndexes = SplitTrials(range(len(Data.index)), trainFraction)
-            if trainIndices is None and testIndices is None:
+            if trainIndexes is None and testIndexes is None:
                 trainIndexes, testIndexes = SplitTrials(range(len(Data.index)), trainFraction)
-            else: # set to passed values...
-                trainIndexes=trainIndices
-                testIndexes=testIndices
+            else:
                 print("You passed a split with the following fraction:", len(trainIndexes)*1./(len(testIndexes)+len(trainIndexes))*100)
             
             ####################################################
@@ -649,13 +627,10 @@ def create_training_dataset(config,num_shuffles=1,Shuffles=None,windows2linux=Fa
                     "num_joints": len(bodyparts),
                     "all_joints": [[i] for i in range(len(bodyparts))],
                     "all_joints_names": [str(bpt) for bpt in bodyparts],
-                    "init_weights": resnet_path,
+                    "init_weights": model_path,
                     "project_path": str(cfg['project_path']),
                     "net_type": net_type
                 }
-
-                defaultconfigfile = str(Path(deeplabcut.__file__).parents[0] / 'pose_cfg.yaml')
-
                 trainingdata = MakeTrain_pose_yaml(items2change,path_train_config,defaultconfigfile)
                 keys2save = [
                     "dataset", "num_joints", "all_joints", "all_joints_names",
